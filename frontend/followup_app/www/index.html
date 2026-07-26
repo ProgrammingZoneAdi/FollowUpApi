@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#3157d5" />
+    <meta
+      name="description"
+      content="FollowUp keeps leads, conversations and next actions in one focused workspace."
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="FollowUp" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' http: https:;"
+    />
+    <title>FollowUp</title>
+    <link rel="icon" href="assets/icons/app-icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="assets/css/tokens.css" />
+    <link rel="stylesheet" href="assets/css/app.css" />
+  </head>
+  <body>
+    <div id="app" aria-live="polite"></div>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <noscript>This application requires JavaScript.</noscript>
+
+    <script src="vendor/jquery/jquery.min.js"></script>
+    <script src="assets/js/config.js"></script>
+    <script src="assets/js/core/html.js"></script>
+    <script src="assets/js/core/storage.js"></script>
+    <script src="assets/js/core/api-client.js"></script>
+    <script src="assets/js/core/router.js"></script>
+    <script src="assets/js/components/toast.js"></script>
+    <script src="assets/js/components/app-shell.js"></script>
+    <script src="assets/js/features/auth/auth.service.js"></script>
+    <script src="assets/js/features/auth/auth.view.js"></script>
+    <script src="assets/js/features/dashboard/dashboard.data.js"></script>
+    <script src="assets/js/features/dashboard/dashboard.view.js"></script>
+    <script src="assets/js/features/leads/leads.data.js"></script>
+    <script src="assets/js/features/leads/leads.view.js"></script>
+    <script src="assets/js/features/shared/feature-pages.js"></script>
+    <script src="assets/js/app.js"></script>
+  </body>
+</html>

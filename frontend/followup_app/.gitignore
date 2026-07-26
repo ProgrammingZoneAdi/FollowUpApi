@@ -1,0 +1,8 @@
+node_modules/
+.DS_Store
+npm-debug.log*
+android/.gradle/
+android/local.properties
+android/app/build/
+ios/App/Pods/
+ios/App/App.xcworkspace/xcuserdata/

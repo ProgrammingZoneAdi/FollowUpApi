@@ -1,0 +1,31 @@
+{
+  "name": "FollowUp Lead Workspace",
+  "short_name": "FollowUp",
+  "description": "Lead tracking and follow-up workspace for growing teams.",
+  "start_url": "./#/dashboard",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6fb",
+  "theme_color": "#3157d5",
+  "icons": [
+    {
+      "src": "assets/icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Leads",
+      "short_name": "Leads",
+      "url": "./#/leads"
+    },
+    {
+      "name": "Today's follow-ups",
+      "short_name": "Follow-ups",
+      "url": "./#/follow-ups"
+    }
+  ]
+}
