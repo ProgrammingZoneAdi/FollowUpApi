@@ -13,6 +13,7 @@ namespace FollowUpApi.Domain.Managers;
 public sealed class UserManager : IUserManager
 {
     private const string ActiveStatus = "Active";
+    private const string InactiveStatus = "Inactive";
 
     private static readonly string[] UserManagementRoles =
     [
@@ -364,22 +365,340 @@ public sealed class UserManager : IUserManager
         }
     }
 
-    private static async Task<ServiceResult<AddCompanyUserResponse>>
-        RollbackConflictAsync(
-            IDbContextTransaction transaction,
-            string message)
+    public async Task<ServiceResult<PaginationResponse<CompanyUserListItemResponse>>> GetCompanyUsersAsync(Guid companyId, Guid requestedByUserId, GetCompanyUsersRequest request, CancellationToken cancellationToken = default)
     {
-        await transaction.RollbackAsync(
-            CancellationToken.None);
+        var access = await _companyAccessService.CheckAccessAsync(companyId, requestedByUserId, Array.Empty<string>(), cancellationToken);
 
-        return ServiceResult<AddCompanyUserResponse>
-            .Conflict(message);
+        if(access.Status == CompanyAccessStatus.CompanyNotFound)
+        {
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.NotFound("Company was not found");
+        }
+
+        if(access.Status == CompanyAccessStatus.Forbidden)
+        {
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.Forbidden("You are not an active member of this company");
+        }
+
+        var pageNumber = request.PageNumber;
+        var pageSize = request.PageSize;
+        var search = request.Search?.Trim();
+        var requestedRole = request.Role?.Trim();
+        var requestedStatus = request.Status?.Trim();
+
+        if (pageNumber < 1)
+        {
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.ValidationError("Page Number must be greater than zero");
+        }
+
+        if(pageSize is < 1 or > 100)
+        {
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.ValidationError("Page size must be between 1 and 100");
+        }
+
+        if(!string.IsNullOrWhiteSpace(search) && search.Length > 100)
+        {
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.ValidationError("Search text cannot exceed 100 characters");
+        }
+
+        if((long)(pageNumber - 1) * pageSize > int.MaxValue)
+        {
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.ValidationError("Requested page is too large");
+        }
+
+        string? roleFilter = null;
+
+        if(!string.IsNullOrWhiteSpace(requestedRole) && !string.Equals(requestedRole, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            var allowedRole = new[] { "Owner", "Admin", "Counsellor", "Staff" }.FirstOrDefault(role => string.Equals(role, requestedRole, StringComparison.OrdinalIgnoreCase));
+
+            if(allowedRole is null)
+            {
+                return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.ValidationError("Role must be Owner, Admin, " + "Counsellor, Staff, or All");
+            }
+
+            roleFilter = allowedRole;
+        }
+
+        string? statusFilter;
+
+        if (string.IsNullOrWhiteSpace(requestedStatus))
+        {
+            statusFilter = ActiveStatus;
+        }
+        else if (string.Equals(requestedStatus, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            statusFilter = null;
+        }
+        else if(string.Equals(requestedStatus, "Active", StringComparison.OrdinalIgnoreCase))
+        {
+            statusFilter = "Active";
+        }
+        else if(string.Equals(requestedStatus, "Inactive", StringComparison.OrdinalIgnoreCase))
+        {
+            statusFilter = "Inactive";
+        }
+        else
+        {
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.ValidationError("Status must be Active, Inactive, or All");
+        }
+
+        try
+        {
+            var query = _dbContext.LinkCompanyUsers.AsNoTracking().Where(link => !link.IsDeleted && link.CompanyId == companyId && link.User != null && !link.User.IsDeleted);
+
+            if(roleFilter is not null)
+            {
+                query = query.Where(link => link.Role == roleFilter);
+            }
+
+            if (statusFilter is not null)
+            {
+                query = query.Where(link => link.Status == statusFilter);
+            }
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var searchPattern = $"%{search}%";
+
+                query = query.Where(link => EF.Functions.ILike(link.User!.Name, searchPattern) || EF.Functions.ILike(link.User.Email, searchPattern) || EF.Functions.ILike(link.User.Mobile, searchPattern));
+            }
+
+            var totalCount = await query.CountAsync(cancellationToken);
+
+            // owner will appear first
+            var rows = await query.OrderByDescending(link => link.IsPrimaryOwner).ThenBy(link => link.User!.Name)
+                .Skip((pageNumber - 1) * pageSize).Take(pageSize).Select(link => new CompanyUserListItemResponse
+                {
+                    LinkCompanyUserId = link.Id,
+                    UserId = link.UserId,
+                    Name = link.User!.Name,
+                    Mobile = link.User.Mobile,
+                    Email = link.User.Email,
+                    Role = link.Role,
+                    Status = link.Status,
+                    IsPrimaryOwner = link.IsPrimaryOwner,
+                    JoinedOn = link.CreatedOn
+                }).ToListAsync(cancellationToken);
+
+            var response = new PaginationResponse<CompanyUserListItemResponse>
+            {
+                Rows = rows,
+                TotalCount = totalCount,
+                PageNumber = pageNumber,
+                PageSize = pageSize
+            };
+
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.Ok(response, "Company users retrieved successfully");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch(Exception exception)
+        {
+            _logger.LogError(exception, "Unexpected error while retrieving users " + "for company {CompanyId}", companyId);
+
+            return ServiceResult<PaginationResponse<CompanyUserListItemResponse>>.Error("An unexpected error occured while " + "retrieving company users");
+        }
+        
+    }
+
+    public async Task<ServiceResult<CompanyUserListItemResponse>> UpdateCompanyUserRoleAsync(Guid companyId, Guid targetUserId, Guid requestedByUserId, UpdateCompanyUserRoleRequest request, CancellationToken cancellationToken = default)
+    {
+        var access = await _companyAccessService.CheckAccessAsync(companyId, requestedByUserId, UserManagementRoles, cancellationToken);
+
+        if(access.Status == CompanyAccessStatus.CompanyNotFound)
+        {
+            return ServiceResult<CompanyUserListItemResponse>.NotFound("Company was not found");
+        }
+
+        if(access.Status == CompanyAccessStatus.Forbidden)
+        {
+            return ServiceResult<CompanyUserListItemResponse>.Forbidden("Only a company owner or admin " + "can update member roles");
+        }
+
+        // Avoid accidental self - demotion.
+        if(targetUserId == requestedByUserId)
+        {
+            return ServiceResult<CompanyUserListItemResponse>.Conflict("You cannot change your own company role");
+        }
+
+        var requestedRole = request.Role?.Trim() ?? string.Empty;
+
+        // AssignableRoles already exists in UserManager.
+
+        if(!AssignableRoles.TryGetValue(requestedRole, out var role))
+        {
+            return ServiceResult<CompanyUserListItemResponse>.ValidationError("Role must be Admin, Counsellor, or staff");
+        }
+
+        try
+        {
+            var membership = await _dbContext.LinkCompanyUsers.Include(link => link.User)
+                .FirstOrDefaultAsync(link => !link.IsDeleted && link.CompanyId == companyId && link.UserId == targetUserId, cancellationToken);
+
+            if(membership is null || membership.User is null || membership.User.IsDeleted)
+            {
+                return ServiceResult<CompanyUserListItemResponse>.NotFound("Company user was not found");
+            }
+
+            if (membership.IsPrimaryOwner)
+            {
+                return ServiceResult<CompanyUserListItemResponse>.Conflict("The primary owner's role cannot be changed");
+            }
+
+            if (!string.Equals(membership.Status, ActiveStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                return ServiceResult<CompanyUserListItemResponse>.Conflict("An inactive company user's role cannot be changed");
+            }
+
+            if (string.Equals(membership.Role,role, StringComparison.OrdinalIgnoreCase))
+            {
+                return ServiceResult<CompanyUserListItemResponse>
+                    .Ok(MapCompanyUser(membership),"Company user already has this role");
+            }
+
+            var oldRole = membership.Role;
+
+            membership.Role = role;
+            membership.UpdatedOn = DateTime.UtcNow;
+            membership.UpdatedBy = requestedByUserId;
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Company user {TargetUserId} role changed " + "from {OldRole} to {NewRole} in company " + "{CompanyId} by {RequestedByUserId}",
+                targetUserId, oldRole, role, companyId, requestedByUserId);
+
+            return ServiceResult<CompanyUserListItemResponse>.Ok(MapCompanyUser(membership), "Company user role updated successfully");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch(DbUpdateException exception)
+        {
+            _logger.LogWarning(exception, "Database conflict while updating user " + "{TargetUserId} role in company {CompanyId}", targetUserId, companyId);
+
+            return ServiceResult<CompanyUserListItemResponse>.Conflict("Company user role could not updated " + "because the data conflicts with an " + "existing record");
+        }
+        catch(Exception exception)
+        {
+            _logger.LogError(exception, "Unexpected error while updating user " + "{TargetUserId} role in company {CompanyId}", targetUserId, companyId);
+
+            return ServiceResult<CompanyUserListItemResponse>.Error("An unexpected error occured while " + "updating the company user role");
+        }
+
+    }
+
+
+    public async Task<ServiceResult<CompanyUserListItemResponse>> DeactivateCompanyUserAsync(Guid companyId, Guid targetUserId, Guid requestedByUserId, CancellationToken cancellationToken = default)
+    {
+        var access = await _companyAccessService.CheckAccessAsync(companyId, requestedByUserId, UserManagementRoles, cancellationToken);
+
+        if(access.Status == CompanyAccessStatus.CompanyNotFound)
+        {
+            return ServiceResult<CompanyUserListItemResponse>.NotFound("Company was not found");
+        }
+
+        if(access.Status == CompanyAccessStatus.Forbidden)
+        {
+            return ServiceResult<CompanyUserListItemResponse>.Forbidden("Only a company owner or admin " + "can deactivate team members");
+        }
+
+        // prevent accidental self - lockout.
+
+        if(targetUserId == requestedByUserId)
+        {
+            return ServiceResult<CompanyUserListItemResponse>.Conflict("You cannot deactivate your own " + "company membership");
+        }
+
+        try
+        {
+            var membership = await _dbContext.LinkCompanyUsers.Include(link => link.User).FirstOrDefaultAsync(link => !link.IsDeleted && link.CompanyId == companyId && link.UserId == targetUserId, cancellationToken);
+
+            if(membership is null || membership.User is null || membership.User.IsDeleted)
+            {
+                return ServiceResult<CompanyUserListItemResponse>.NotFound("Company user was not found");
+            }
+
+            // Company must always retain its primary owner.
+
+            if (membership.IsPrimaryOwner)
+            {
+                return ServiceResult<CompanyUserListItemResponse>.Conflict("The primary owner cannot be deactivated");
+            }
+
+            // DELETE remains idempotent.
+            if(string.Equals(membership.Status, InactiveStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                return ServiceResult<CompanyUserListItemResponse>.Ok(MapCompanyUser(membership), "Company user is already inactive");
+            }
+
+            // Active leads must not become assigned to an inactive company member.
+
+            var assignedActiveLeadCount = await _dbContext.Leads.AsNoTracking().CountAsync(lead => !lead.IsDeleted && lead.CompanyId == companyId && lead.AssignedToUserId == targetUserId && lead.Status != "Won" && lead.Status != "Lost", cancellationToken);
+
+
+            if(assignedActiveLeadCount > 0)
+            {
+                return ServiceResult<CompanyUserListItemResponse>.Conflict($"Reassing {assignedActiveLeadCount} " + "active lead(s) before deactivating " + "this company user");
+            }
+
+            membership.Status = InactiveStatus;
+            membership.UpdatedOn = DateTime.UtcNow;
+            membership.UpdatedBy = requestedByUserId;
+
+            // Do not change AppUser.Status. Do not set membership.IsDeleted = true.
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Company user {TargetUserId} deactivated " + "in company {CompanyId} by " + "{RequestedByUserId}", targetUserId, companyId, requestedByUserId);
+
+            return ServiceResult<CompanyUserListItemResponse>.Ok(MapCompanyUser(membership), "Company user deactivated successfully");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch(DbUpdateException exception)
+        {
+            _logger.LogWarning(exception, "Database conflict when deactivating user " + "{TargetUserId} in company {CompanyId}", targetUserId, companyId);
+
+            return ServiceResult<CompanyUserListItemResponse>.Conflict("Company user could not be deactivated " + "because the data conflicts with an " + "existing record");
+        }
+        catch(Exception exception)
+        {
+            _logger.LogError(exception, "Unexpected error while deactivating user " + "{TargetUserId} in company {CompanyId}", targetUserId, companyId);
+
+            return ServiceResult<CompanyUserListItemResponse>.Error("An unexpected error occured while " + "deactivating the company user");
+        }
+    }
+    private static CompanyUserListItemResponse MapCompanyUser(LinkCompanyUser membership)
+    {
+        return new CompanyUserListItemResponse
+        {
+            LinkCompanyUserId = membership.Id,
+            UserId = membership.UserId,
+            Name = membership.User!.Name,
+            Mobile = membership.User.Mobile,
+            Email = membership.User.Email,
+            Role = membership.Role,
+            Status = membership.Status,
+            IsPrimaryOwner = membership.IsPrimaryOwner,
+            JoinedOn = membership.CreatedOn
+        };
+    }
+
+    private static async Task<ServiceResult<AddCompanyUserResponse>> RollbackConflictAsync( IDbContextTransaction transaction,  string message)
+    {
+        await transaction.RollbackAsync(CancellationToken.None);
+
+        return ServiceResult<AddCompanyUserResponse>.Conflict(message);
     }
 
     private static string NormalizeMobile(string mobile)
     {
-        return new string(
-            mobile.Where(char.IsDigit).ToArray());
+        return new string(mobile.Where(char.IsDigit).ToArray());
     }
 
     private static string? ValidateProfile(

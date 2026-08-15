@@ -1,17 +1,19 @@
-using System.Text;
 using FollowUpApi.Common;
 using FollowUpApi.DataContext;
+using FollowUpApi.DataContext.Entities;
 using FollowUpApi.Domain.Interfaces;
 using FollowUpApi.Domain.Managers;
-using Microsoft.EntityFrameworkCore;
-using Scalar.AspNetCore;
-using FollowUpApi.DataContext.Entities;
 using FollowUpApi.Features.Authentication;
 using FollowUpApi.Features.CompanyManagement;
+using FollowUpApi.Features.CompanyUsers;
+using FollowUpApi.Features.Courses;
+using FollowUpApi.Features.LeadSources;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using FollowUpApi.Features.CompanyUsers;
+using Scalar.AspNetCore;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -73,8 +75,8 @@ builder.Services.AddAuthorization();
 builder.Services.AddTransient<ICompanyManager, CompanyManager>();
 builder.Services.AddScoped<IUserManager, UserManager>();
 builder.Services.AddScoped<ICompanyAccessService, CompanyAccessService>();
-builder.Services.AddTransient<ICourseManager, CourseManager>();
-builder.Services.AddTransient<ILeadSourceManager, LeadSourceManager>();
+builder.Services.AddScoped<ICourseManager, CourseManager>();
+builder.Services.AddScoped<ILeadSourceManager, LeadSourceManager>();
 builder.Services.AddTransient<ILeadManager, LeadManager>();
 builder.Services.AddTransient<IFollowUpManager, FollowUpManager>();
 builder.Services.AddTransient<IDashboardManager, DashboardManager>();
@@ -95,5 +97,7 @@ app.UseAuthorization();
 app.MapCompanyOnboardEndpont();
 app.MapLoginEndpoint();
 app.MapCompanyUserEndpoints();
+app.MapCourseEndpoints();
+app.MapLeadSourceEndpoints();
 
 app.Run();

@@ -1,5 +1,6 @@
 ﻿using FollowUpApi.Common;
 using FollowUpApi.Features.CompanyManagement;
+using FollowUpApi.Features.Courses;
 
 namespace FollowUpApi.Domain.Interfaces;
 
