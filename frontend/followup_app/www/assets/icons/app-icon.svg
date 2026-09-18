@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">FollowUp</title>
+  <defs>
+    <linearGradient id="background" x1="70" y1="52" x2="440" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5273e9"/>
+      <stop offset="1" stop-color="#2446b6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#background)"/>
+  <path d="M139 145h234v46H185v69h159v46H185v93h-46V145Z" fill="#fff"/>
+  <circle cx="353" cy="376" r="34" fill="#8de2c2"/>
+</svg>
