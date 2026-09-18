@@ -23,3 +23,9 @@ It is designed to help teams manage leads, assignments, follow-up activity, cour
 - Entity Framework Core
 - OpenAPI / Scalar API documentation
 - Cross-platform frontend foundation using Capacitor
+
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0.
+
+See the [LICENSE](LICENSE) file for details.
