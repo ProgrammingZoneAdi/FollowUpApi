@@ -10,6 +10,7 @@ namespace FollowUpApi.Domain.Managers;
 public class LeadSourceManager : ILeadSourceManager
 {
     private const string ActiveStatus = "Active";
+    private const string InactiveStatus = "Inactive";
     private static readonly string[] LeadSourceManagementRoles = ["Owner", "Admin"];
 
     private readonly AppDbContext _dbContext;
@@ -275,6 +276,65 @@ public class LeadSourceManager : ILeadSourceManager
         }
     }
 
+    public async Task<ServiceResult<LeadSourceResponse>> DeactivateLeadSourceAsync(Guid companyId, Guid sourceId, Guid requestedByUserId, CancellationToken cancellationToken = default)
+    {
+        var access = await _companyAccessService.CheckAccessAsync(companyId, requestedByUserId, LeadSourceManagementRoles, cancellationToken);
+
+        if(access.Status == CompanyAccessStatus.CompanyNotFound)
+        {
+            return ServiceResult<LeadSourceResponse>.NotFound("Company was not found");
+        }
+
+        if(access.Status == CompanyAccessStatus.Forbidden)
+        {
+            return ServiceResult<LeadSourceResponse>.Forbidden("Only a company owner or admin can deactivate lead sources");
+        }
+
+        try
+        {
+            var leadSource = await _dbContext.LeadSources.FirstOrDefaultAsync(source => !source.IsDeleted && source.CompanyId == companyId && source.Id == sourceId, cancellationToken);
+
+            if(leadSource is null)
+            {
+                return ServiceResult<LeadSourceResponse>.NotFound("Lead source was not found");
+            }
+
+            // Repeated delete calls remain successful.
+
+            if(string.Equals(leadSource.Status, InactiveStatus, StringComparison.OrdinalIgnoreCase))
+            {
+                return ServiceResult<LeadSourceResponse>.Ok(MapLeadSource(leadSource), "Lead source is already inactive");
+            }
+
+            // IsDeleted false so that existing lead history remains safe.
+
+            leadSource.Status = InactiveStatus;
+            leadSource.UpdatedOn = DateTime.UtcNow;
+            leadSource.UpdatedBy = requestedByUserId;
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("Lead source {SourceId} deactivated in company {CompanyId} by {RequestedByUserId}", sourceId, companyId, requestedByUserId);
+
+            return ServiceResult<LeadSourceResponse>.Ok(MapLeadSource(leadSource), "Lead source deactivated successfully");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch(DbUpdateException exception)
+        {
+            _logger.LogWarning(exception, "Database conflict while deactivating lead source {SourceId} in company {CompanyId}", sourceId, companyId);
+
+            return ServiceResult<LeadSourceResponse>.Conflict("Lead source could not be deactivated because the data conflicts with an existing record");
+        }
+        catch(Exception exception)
+        {
+            _logger.LogError(exception, "Unexpected error while deactivating lead source {SourceId} in company {CompanyId}", sourceId, companyId);
+
+            return ServiceResult<LeadSourceResponse>.Error("An unexpected error occurred while deactivating the lead source");
+        }
+    }
     private static LeadSourceResponse MapLeadSource(LeadSource leadSource)
     {
         return new LeadSourceResponse

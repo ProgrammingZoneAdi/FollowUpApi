@@ -38,6 +38,14 @@ public static class LeadSourceEndpoints
             .Produces<ApiResponse<LeadSourceResponse>>(StatusCodes.Status409Conflict)
             .Produces<ApiResponse<LeadSourceResponse>>(StatusCodes.Status500InternalServerError);
 
+        app.MapDelete("/api/companies/{companyId:guid}/lead-sources/{sourceId:guid}", HandleDeactivateLeadSourceAsync).WithName("DeactivateLeadSource").WithTags("Lead Sources").RequireAuthorization()
+            .Produces<ApiResponse<LeadSourceResponse>>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces<ApiResponse<LeadSourceResponse>>(StatusCodes.Status403Forbidden)
+            .Produces<ApiResponse<LeadSourceResponse>>(StatusCodes.Status404NotFound)
+            .Produces<ApiResponse<LeadSourceResponse>>(StatusCodes.Status409Conflict)
+            .Produces<ApiResponse<LeadSourceResponse>>(StatusCodes.Status500InternalServerError);
+
         return app;
     }
 
@@ -104,6 +112,25 @@ public static class LeadSourceEndpoints
         return MapError(result);
     }
 
+    private static async Task<IResult> HandleDeactivateLeadSourceAsync(Guid companyId, Guid sourceId, ClaimsPrincipal currentUser, ILeadSourceManager leadSourceManager, CancellationToken cancellationToken)
+    {
+        var userIdValue = currentUser.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if(!Guid.TryParse(userIdValue, out var requestedByUserId))
+        {
+            return Results.Unauthorized();
+        }
+
+        var result = await leadSourceManager.DeactivateLeadSourceAsync(companyId, sourceId, requestedByUserId, cancellationToken);
+
+        if (result.Success)
+        {
+            var response = ApiResponse<LeadSourceResponse>.Ok(result.Data, result.Message);
+            return Results.Ok(response);
+        }
+
+        return MapError(result);
+    }
     private static IResult MapError<T>(ServiceResult<T> result)
     {
         var error = ApiResponse<T>.Fail(result.Message);
