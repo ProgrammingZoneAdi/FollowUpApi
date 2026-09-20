@@ -128,6 +128,180 @@ public sealed class AuthManager : IAuthManager
         return ApiResponse<LoginResponse>.Ok(response, "Login successful");
     }
 
+    public async Task<ServiceResult<CurrentUserResponse>> GetCurrentUserAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _dbContext.AppUsers
+                .AsNoTracking()
+                .Where(user => user.Id == userId && !user.IsDeleted && user.Status == ActiveStatus)
+                .Select(user => new CurrentUserResponse
+                {
+                    User = new LoginUserResponse
+                    {
+                        UserId = user.Id,
+                        Name = user.Name,
+                        Email = user.Email,
+                        Mobile = user.Mobile
+                    },
+                    Companies = _dbContext.LinkCompanyUsers
+                        .Where(link => link.UserId == user.Id
+                            && !link.IsDeleted
+                            && link.Status == ActiveStatus
+                            && link.Company != null
+                            && !link.Company.IsDeleted
+                            && link.Company.Status == ActiveStatus)
+                        .OrderByDescending(link => link.IsPrimaryOwner)
+                        .ThenBy(link => link.Company!.CompanyName)
+                        .ThenBy(link => link.CompanyId)
+                        .Select(link => new LoginCompanyResponse
+                        {
+                            CompanyId = link.CompanyId,
+                            CompanyName = link.Company!.CompanyName,
+                            Role = link.Role,
+                            IsPrimaryOwner = link.IsPrimaryOwner
+                        })
+                        .ToList()
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (response is null)
+            {
+                return ServiceResult<CurrentUserResponse>.NotFound("User account is unavailable. Please log in again.");
+            }
+
+            return ServiceResult<CurrentUserResponse>.Ok(response, "Current user retrieved successfully");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to retrieve current user {UserId}", userId);
+            return ServiceResult<CurrentUserResponse>.Error("Unable to retrieve current user. Please try again.");
+        }
+    }
+
+    public async Task<ServiceResult<ChangePasswordResponse>> ChangePasswordAsync(Guid userId, ChangePasswordRequest request, CancellationToken cancellationToken = default)
+    {
+        var currentPassword = request.CurrentPassword ?? string.Empty;
+        var newPassword = request.NewPassword ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(currentPassword) || string.IsNullOrWhiteSpace(newPassword))
+        {
+            return ServiceResult<ChangePasswordResponse>.ValidationError("Current password and new password are required");
+        }
+
+        if (newPassword.Length < 8 || newPassword.Length > 128)
+        {
+            return ServiceResult<ChangePasswordResponse>.ValidationError("New password must contain between 8 and 128 characters");
+        }
+
+        if (!newPassword.Any(char.IsUpper) || !newPassword.Any(char.IsLower)
+            || !newPassword.Any(char.IsDigit) || !newPassword.Any(character => !char.IsLetterOrDigit(character)))
+        {
+            return ServiceResult<ChangePasswordResponse>.ValidationError("New password must include uppercase, lowercase, number and special character");
+        }
+
+        if (newPassword == currentPassword)
+        {
+            return ServiceResult<ChangePasswordResponse>.ValidationError("New password must be different from the current password");
+        }
+
+        try
+        {
+            var user = await _dbContext.AppUsers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(user => user.Id == userId && !user.IsDeleted && user.Status == ActiveStatus, cancellationToken);
+
+            if (user is null)
+            {
+                return ServiceResult<ChangePasswordResponse>.NotFound("User account is unavailable. Please log in again.");
+            }
+
+            if (_passwordHasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword) == PasswordVerificationResult.Failed)
+            {
+                return ServiceResult<ChangePasswordResponse>.ValidationError("Current password is incorrect");
+            }
+
+            var newPasswordHash = _passwordHasher.HashPassword(user, newPassword);
+            var updatedOn = DateTime.UtcNow;
+
+            // Update only if the verified password and active account state are unchanged.
+            var affectedRows = await _dbContext.AppUsers
+                .Where(account => account.Id == userId && !account.IsDeleted
+                    && account.Status == ActiveStatus && account.PasswordHash == user.PasswordHash)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(account => account.PasswordHash, newPasswordHash)
+                    .SetProperty(account => account.UpdatedOn, updatedOn)
+                    .SetProperty(account => account.UpdatedBy, userId), cancellationToken);
+
+            if (affectedRows == 0)
+            {
+                return ServiceResult<ChangePasswordResponse>.Conflict("Account changed during this request. Please log in again and retry.");
+            }
+
+            return ServiceResult<ChangePasswordResponse>.Ok(new ChangePasswordResponse
+            {
+                UserId = userId,
+                UpdatedOn = updatedOn
+            }, "Password changed successfully");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to change password for user {UserId}", userId);
+            return ServiceResult<ChangePasswordResponse>.Error("Unable to change password. Please try again.");
+        }
+    }
+
+    public async Task<ServiceResult<LoginUserResponse>> UpdateProfileAsync(Guid userId, UpdateProfileRequest request, CancellationToken cancellationToken = default)
+    {
+        var name = request.Name?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 150)
+        {
+            return ServiceResult<LoginUserResponse>.ValidationError("Name is required and cannot exceed 150 characters");
+        }
+
+        try
+        {
+            var user = await _dbContext.AppUsers
+                .FirstOrDefaultAsync(user => user.Id == userId && !user.IsDeleted && user.Status == ActiveStatus, cancellationToken);
+
+            if (user is null)
+            {
+                return ServiceResult<LoginUserResponse>.NotFound("User account is unavailable. Please log in again.");
+            }
+
+            user.Name = name;
+            user.UpdatedOn = DateTime.UtcNow;
+            user.UpdatedBy = userId;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            return ServiceResult<LoginUserResponse>.Ok(new LoginUserResponse
+            {
+                UserId = user.Id,
+                Name = user.Name,
+                Email = user.Email,
+                Mobile = user.Mobile
+            }, "Profile updated successfully");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to update profile for user {UserId}", userId);
+            return ServiceResult<LoginUserResponse>.Error("Unable to update profile. Please try again.");
+        }
+    }
+
     private static string NormalizeMobile(string mobile)
     {
         return new string(mobile.Where(char.IsDigit).ToArray());

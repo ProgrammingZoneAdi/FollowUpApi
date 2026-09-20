@@ -7,6 +7,7 @@ using FollowUpApi.Features.Authentication;
 using FollowUpApi.Features.CompanyManagement;
 using FollowUpApi.Features.CompanyUsers;
 using FollowUpApi.Features.Courses;
+using FollowUpApi.Features.Dashboard;
 using FollowUpApi.Features.FollowUps;
 using FollowUpApi.Features.Leads;
 using FollowUpApi.Features.LeadSources;
@@ -81,7 +82,7 @@ builder.Services.AddScoped<ICourseManager, CourseManager>();
 builder.Services.AddScoped<ILeadSourceManager, LeadSourceManager>();
 builder.Services.AddScoped<ILeadManager, LeadManager>();
 builder.Services.AddScoped<IFollowUpManager, FollowUpManager>();
-builder.Services.AddTransient<IDashboardManager, DashboardManager>();
+builder.Services.AddScoped<IDashboardManager, DashboardManager>();
 builder.Services.AddScoped<IAuthManager, AuthManager>();
 builder.Services.AddSingleton<ITokenService, JwtTokenService>();
 
@@ -97,10 +98,16 @@ app.UseAuthorization();
 
 // Register Endpoints
 app.MapCompanyOnboardEndpont();
+app.MapCompanyEndpoints();
+app.MapUpdateCompanyEndpoint();
+app.MapUpdateProfileEndpoint();
 app.MapLoginEndpoint();
+app.MapCurrentUserEndpoint();
+app.MapChangePasswordEndpoint();
 app.MapCompanyUserEndpoints();
 app.MapCourseEndpoints();
 app.MapLeadSourceEndpoints();
 app.MapLeadEndpoints();
 app.MapFollowUpEndpoints();
+app.MapDashboardEndpoints();
 app.Run();

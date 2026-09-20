@@ -19,11 +19,14 @@ public class CompanyManager : ICompanyManager
     private readonly AppDbContext _dbContext;
     private readonly IPasswordHasher<AppUser> _passwordHasher;
     private readonly ILogger<CompanyManager> _logger;
-    public CompanyManager(AppDbContext dbContext,IPasswordHasher<AppUser> passwordHasher,ILogger<CompanyManager> logger)
+    private readonly ICompanyAccessService _companyAccessService;
+
+    public CompanyManager(AppDbContext dbContext, IPasswordHasher<AppUser> passwordHasher, ILogger<CompanyManager> logger, ICompanyAccessService companyAccessService)
     {
         _dbContext = dbContext;
         _passwordHasher = passwordHasher;
         _logger = logger;
+        _companyAccessService = companyAccessService;
     }
 
     public async Task<ApiResponse<CompanyOnboardResponse>> OnboardCompanyAsync(CompanyOnboardRequest request,CancellationToken cancellationToken = default)
@@ -128,6 +131,157 @@ public class CompanyManager : ICompanyManager
             _logger.LogError(exception, "Unexpected error while onboarding company {CompanyName}",  companyName);
 
             return ApiResponse<CompanyOnboardResponse>.Fail("An unexpected error occurred while onboarding the company");
+        }
+    }
+
+    public async Task<ServiceResult<CompanyDetailsResponse>> GetCompanyAsync(Guid companyId, Guid requestedByUserId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var access = await _companyAccessService.CheckAccessAsync(companyId, requestedByUserId, new[] { "Owner", "Admin", "Counsellor", "Staff" }, cancellationToken);
+
+            if (access.Status == CompanyAccessStatus.CompanyNotFound)
+            {
+                return ServiceResult<CompanyDetailsResponse>.NotFound("Company not found");
+            }
+
+            if (access.Status != CompanyAccessStatus.Granted)
+            {
+                return ServiceResult<CompanyDetailsResponse>.Forbidden("You do not have access to this company");
+            }
+
+            var response = await _dbContext.Companies
+                .AsNoTracking()
+                .Where(company => company.Id == companyId && !company.IsDeleted && company.Status == ActiveStatus)
+                .Select(company => new CompanyDetailsResponse
+                {
+                    CompanyId = company.Id,
+                    CompanyName = company.CompanyName,
+                    OwnerName = company.OwnerName,
+                    Mobile = company.Mobile,
+                    Email = company.Email,
+                    Status = company.Status,
+                    CreatedOn = company.CreatedOn,
+                    UpdatedOn = company.UpdatedOn
+                })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (response is null)
+            {
+                return ServiceResult<CompanyDetailsResponse>.NotFound("Company not found");
+            }
+
+            return ServiceResult<CompanyDetailsResponse>.Ok(response, "Company details retrieved successfully");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to retrieve company {CompanyId}", companyId);
+            return ServiceResult<CompanyDetailsResponse>.Error("Unable to retrieve company details. Please try again.");
+        }
+    }
+
+    public async Task<ServiceResult<CompanyDetailsResponse>> UpdateCompanyAsync(Guid companyId, Guid requestedByUserId, UpdateCompanyRequest request, CancellationToken cancellationToken = default)
+    {
+        var companyName = request.CompanyName?.Trim() ?? string.Empty;
+        var ownerName = request.OwnerName?.Trim() ?? string.Empty;
+        var mobile = NormalizeMobile(request.Mobile ?? string.Empty);
+        var email = request.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(companyName) || companyName.Length > 200)
+        {
+            return ServiceResult<CompanyDetailsResponse>.ValidationError("Company name is required and cannot exceed 200 characters");
+        }
+
+        if (string.IsNullOrWhiteSpace(ownerName) || ownerName.Length > 150)
+        {
+            return ServiceResult<CompanyDetailsResponse>.ValidationError("Owner name is required and cannot exceed 150 characters");
+        }
+
+        if (mobile.Length is < 10 or > 15)
+        {
+            return ServiceResult<CompanyDetailsResponse>.ValidationError("Mobile number must contain between 10 and 15 digits");
+        }
+
+        if (string.IsNullOrWhiteSpace(email) || email.Length > 254 || !new EmailAddressAttribute().IsValid(email))
+        {
+            return ServiceResult<CompanyDetailsResponse>.ValidationError("A valid email address is required");
+        }
+
+        try
+        {
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            var access = await _companyAccessService.CheckAccessAsync(companyId, requestedByUserId, new[] { "Owner", "Admin" }, cancellationToken);
+
+            if (access.Status == CompanyAccessStatus.CompanyNotFound)
+            {
+                return ServiceResult<CompanyDetailsResponse>.NotFound("Company not found");
+            }
+
+            if (access.Status != CompanyAccessStatus.Granted)
+            {
+                return ServiceResult<CompanyDetailsResponse>.Forbidden("Only Owner or Admin can update company details");
+            }
+
+            var company = await _dbContext.Companies
+                .FirstOrDefaultAsync(company => company.Id == companyId && !company.IsDeleted && company.Status == ActiveStatus, cancellationToken);
+
+            if (company is null)
+            {
+                return ServiceResult<CompanyDetailsResponse>.NotFound("Company not found");
+            }
+
+            var duplicateExists = await _dbContext.Companies.AsNoTracking()
+                .AnyAsync(other => other.Id != companyId && !other.IsDeleted
+                    && other.CompanyName.ToLower() == companyName.ToLower() && other.Mobile == mobile, cancellationToken);
+
+            if (duplicateExists)
+            {
+                return ServiceResult<CompanyDetailsResponse>.Conflict("Company already exists with the same name and mobile number");
+            }
+
+            company.CompanyName = companyName;
+            company.OwnerName = ownerName;
+            company.Mobile = mobile;
+            company.Email = email;
+            company.UpdatedOn = DateTime.UtcNow;
+            company.UpdatedBy = requestedByUserId;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return ServiceResult<CompanyDetailsResponse>.Ok(new CompanyDetailsResponse
+            {
+                CompanyId = company.Id,
+                CompanyName = company.CompanyName,
+                OwnerName = company.OwnerName,
+                Mobile = company.Mobile,
+                Email = company.Email,
+                Status = company.Status,
+                CreatedOn = company.CreatedOn,
+                UpdatedOn = company.UpdatedOn
+            }, "Company details updated successfully");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is Npgsql.PostgresException { SqlState: "40001" or "40P01" }
+            || exception.InnerException is Npgsql.PostgresException { SqlState: "40001" or "40P01" })
+        {
+            return ServiceResult<CompanyDetailsResponse>.Conflict("Company details changed during this request. Please reload and retry.");
+        }
+        catch (DbUpdateException exception)
+        {
+            _logger.LogWarning(exception, "Database conflict while updating company {CompanyId}", companyId);
+            return ServiceResult<CompanyDetailsResponse>.Conflict("Company details conflict with an existing record");
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to update company {CompanyId}", companyId);
+            return ServiceResult<CompanyDetailsResponse>.Error("Unable to update company details. Please try again.");
         }
     }
 
