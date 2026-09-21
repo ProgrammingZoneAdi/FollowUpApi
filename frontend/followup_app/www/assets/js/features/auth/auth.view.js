@@ -35,47 +35,56 @@
                   minlength="8" required placeholder="Enter your password" />
               </label>
               <div class="login-meta">
-                <label class="checkbox-row"><input type="checkbox" checked /> Remember me</label>
-                <button class="button button-ghost" type="button">Forgot password?</button>
+                <label class="checkbox-row"><input id="remember-me" type="checkbox" /> Remember me</label>
               </div>
               <button class="button button-primary full-width" id="login-button" type="submit">
                 Sign in
               </button>
-              <button class="button button-secondary full-width" id="demo-button" type="button">
-                Enter demo workspace
-              </button>
+              <p id="login-error" role="alert" hidden></p>
             </form>
             <div class="demo-note">
-              API mock mode is enabled. Real authentication will be connected after the login endpoint is built.
+              Login and company registration are live. Other workspace data is still demo data.
             </div>
+            <p><a href="#/onboard">Create your company account</a></p>
           </div>
         </section>
       </main>
     `);
 
+    let submitting = false;
     function completeLogin(credentials) {
+      if (submitting) return;
+      submitting = true;
+      const remember = $("#remember-me").prop("checked");
+      const errorMessage = $("#login-error").text("").prop("hidden", true);
       const button = $("#login-button").prop("disabled", true).text("Signing in…");
       FollowUp.auth
         .login(credentials)
         .done((session) => {
-          FollowUp.storage.setSession(session);
-          FollowUp.router.navigate("/dashboard");
+          try {
+            FollowUp.storage.setSession(session, remember);
+            $("#password").val("");
+            FollowUp.router.navigate("/dashboard");
+          } catch (error) {
+            errorMessage.text(error.message || "Unable to save session. Check browser storage settings.").prop("hidden", false);
+          }
         })
-        .fail((error) => FollowUp.toast(error.message || "Unable to sign in.", "error"))
-        .always(() => button.prop("disabled", false).text("Sign in"));
+        .fail((error) => errorMessage.text(error.message || "Unable to sign in.").prop("hidden", false))
+        .always(() => {
+          submitting = false;
+          button.prop("disabled", false).text("Sign in");
+        });
     }
 
     $("#login-form").on("submit", function (event) {
       event.preventDefault();
+      if (!this.reportValidity()) return;
       completeLogin({
         identification: $("#identification").val().trim(),
         password: $("#password").val()
       });
     });
 
-    $("#demo-button").on("click", () =>
-      completeLogin({ identification: "demo@followup.local", password: "demo-only" })
-    );
   }
 
   FollowUp.authView = { render };

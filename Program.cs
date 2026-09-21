@@ -74,6 +74,20 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+// Local browser frontend; production origins must be explicitly configured.
+var frontendOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+if (builder.Environment.IsDevelopment())
+{
+    frontendOrigins = frontendOrigins.Concat(new[] { "http://localhost:5173", "http://127.0.0.1:5173" }).Distinct().ToArray();
+}
+builder.Services.AddCors(options => options.AddPolicy("Frontend", policy =>
+{
+    if (frontendOrigins.Length > 0)
+    {
+        policy.WithOrigins(frontendOrigins).AllowAnyHeader().AllowAnyMethod();
+    }
+}));
+
 // Dependency Injection
 builder.Services.AddTransient<ICompanyManager, CompanyManager>();
 builder.Services.AddScoped<IUserManager, UserManager>();
@@ -93,6 +107,7 @@ app.MapOpenApi();
 // Scalar UI
 app.MapScalarApiReference();
 
+app.UseCors("Frontend");
 app.UseAuthentication();
 app.UseAuthorization();
 

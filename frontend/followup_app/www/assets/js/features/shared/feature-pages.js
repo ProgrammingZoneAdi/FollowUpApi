@@ -18,11 +18,6 @@
       icon: "◇",
       text: "Configure channels such as website, referral, walk-in and campaigns for conversion reporting."
     },
-    "/team": {
-      title: "Team",
-      icon: "♙",
-      text: "Company members, roles and lead assignment will live here after authentication is implemented."
-    },
     "/settings": {
       title: "Settings",
       icon: "⚙",

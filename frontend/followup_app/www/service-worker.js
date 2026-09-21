@@ -1,4 +1,4 @@
-const CACHE_NAME = "followup-shell-v1";
+const CACHE_NAME = "followup-shell-v5";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -16,11 +16,15 @@ const APP_SHELL = [
   "./assets/js/components/app-shell.js",
   "./assets/js/features/auth/auth.service.js",
   "./assets/js/features/auth/auth.view.js",
+  "./assets/js/features/auth/onboard.view.js",
   "./assets/js/features/dashboard/dashboard.data.js",
   "./assets/js/features/dashboard/dashboard.view.js",
   "./assets/js/features/leads/leads.data.js",
   "./assets/js/features/leads/leads.view.js",
   "./assets/js/features/shared/feature-pages.js",
+  "./assets/js/features/team/team.service.js",
+  "./assets/js/features/team/team-list.js",
+  "./assets/js/features/team/team.view.js",
   "./assets/js/app.js"
 ];
 

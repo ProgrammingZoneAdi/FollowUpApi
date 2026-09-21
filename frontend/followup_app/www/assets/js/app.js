@@ -8,7 +8,12 @@
     render: FollowUp.authView.render
   });
   FollowUp.router.register("/dashboard", { render: FollowUp.dashboardView.render });
+  FollowUp.router.register("/onboard", {
+    requiresAuth: false,
+    render: FollowUp.onboardView.render
+  });
   FollowUp.router.register("/leads", { render: FollowUp.leadsView.render });
+  FollowUp.router.register("/team", { render: FollowUp.teamView.render });
 
   Object.keys(FollowUp.featurePages.definitions).forEach((path) => {
     FollowUp.router.register(path, {

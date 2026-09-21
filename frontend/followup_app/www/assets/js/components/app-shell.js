@@ -67,12 +67,15 @@
               <div class="topbar-actions">
                 <button class="icon-button" aria-label="Notifications">♢</button>
                 <button class="avatar-button" id="profile-button" type="button">
-                  <span class="avatar">${initials(user.name)}</span>
+                  <span class="avatar">${FollowUp.escapeHtml(initials(user.name))}</span>
                   <span class="avatar-label">${FollowUp.escapeHtml(user.name)}</span>
                 </button>
               </div>
             </header>
-            <div class="page-content" id="page-content">${options.content}</div>
+            <div class="page-content" id="page-content">
+              <p class="demo-note">Login, Add Team User and Team listing are live. Dashboard and leads still show demo data; other features are being connected.</p>
+              ${options.content}
+            </div>
           </main>
         </div>
       `);

@@ -28,6 +28,18 @@
         return response.data;
       }
       return response;
+    }, (xhr, status) => {
+      if (xhr.status === 401 && token && FollowUp.storage.getToken() === token) {
+        FollowUp.storage.clearSession();
+        FollowUp.router.navigate("/login");
+      }
+      const message = xhr.responseJSON && xhr.responseJSON.message;
+      const fallback = status === "timeout"
+        ? "Request timed out. The request may have completed; check before retrying."
+        : xhr.status === 0
+          ? "Cannot reach the API. Check your connection and make sure the backend is running."
+          : "Request failed. Please try again.";
+      return $.Deferred().reject(new Error(message || fallback)).promise();
     });
   }
 
